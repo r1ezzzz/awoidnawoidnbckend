@@ -176,9 +176,70 @@ app.all('*', async (req, res) => {
   }
 });
 
+// ─── Auto-provision from env vars (for ephemeral filesystems like Render) ────
+function autoProvision() {
+  const { encrypt } = require('./crypto');
+  const { generateProxyKey, hashProxyKey } = require('./crypto');
+
+  // Auto-configure providers from env vars
+  // Format: PROVIDER_<NAME>_KEY and PROVIDER_<NAME>_URL
+  // Also supports the simple format: ANTHROPIC_API_KEY_REAL + ANTHROPIC_BASE_URL_REAL
+  const providerConfigs = [
+    { envKey: 'PROVIDER_ANTHROPIC_KEY', envUrl: 'PROVIDER_ANTHROPIC_URL', name: 'anthropic', defaultUrl: 'https://api.anthropic.com' },
+    { envKey: 'PROVIDER_OPENROUTER_KEY', envUrl: 'PROVIDER_OPENROUTER_URL', name: 'openrouter', defaultUrl: 'https://openrouter.ai/api' },
+    { envKey: 'PROVIDER_AMPERE_KEY', envUrl: 'PROVIDER_AMPERE_URL', name: 'ampere', defaultUrl: 'https://api.ampere.sh' },
+  ];
+
+  for (const cfg of providerConfigs) {
+    const apiKey = process.env[cfg.envKey];
+    if (apiKey) {
+      const baseUrl = process.env[cfg.envUrl] || cfg.defaultUrl;
+      const existing = db.getProvider(cfg.name);
+      if (!existing) {
+        const encryptedKey = encrypt(apiKey, MASTER_PASSWORD);
+        db.saveProvider({ providerName: cfg.name, encryptedApiKey: encryptedKey, baseUrl });
+        console.log(`  ✅ Auto-configured provider: ${cfg.name} → ${baseUrl}`);
+      }
+    }
+  }
+
+  // Also support a generic REAL_API_KEY + REAL_BASE_URL for simple single-provider setup
+  if (process.env.REAL_API_KEY && process.env.REAL_BASE_URL) {
+    const providerName = process.env.REAL_PROVIDER_NAME || 'anthropic';
+    const existing = db.getProvider(providerName);
+    if (!existing) {
+      const encryptedKey = encrypt(process.env.REAL_API_KEY, MASTER_PASSWORD);
+      db.saveProvider({ providerName, encryptedApiKey: encryptedKey, baseUrl: process.env.REAL_BASE_URL });
+      console.log(`  ✅ Auto-configured provider: ${providerName} → ${process.env.REAL_BASE_URL}`);
+    }
+  }
+
+  // Auto-generate a default proxy key if none exist
+  if (process.env.DEFAULT_PROXY_KEY) {
+    const keyHash = hashProxyKey(process.env.DEFAULT_PROXY_KEY);
+    const existing = db.findKeyByHash(keyHash);
+    if (!existing) {
+      db.createProxyKey({
+        name: 'Default Key (from env)',
+        keyHash,
+        keyPrefix: process.env.DEFAULT_PROXY_KEY.substring(0, 12) + '...',
+        targetProvider: process.env.DEFAULT_PROXY_PROVIDER || 'anthropic',
+        expiresAt: null,
+        maxRpm: parseInt(process.env.DEFAULT_PROXY_RPM || '60'),
+        maxRpd: parseInt(process.env.DEFAULT_PROXY_RPD || '10000'),
+        notes: 'Auto-provisioned from DEFAULT_PROXY_KEY env var',
+      });
+      console.log(`  ✅ Auto-configured default proxy key`);
+    }
+  }
+}
+
 // ─── Start Server (async to init DB first) ──────────────────────────
 async function start() {
   await db.initDb();
+
+  // Auto-provision providers and keys from env vars
+  autoProvision();
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log('');
