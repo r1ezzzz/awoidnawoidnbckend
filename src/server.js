@@ -142,8 +142,48 @@ app.all('*', async (req, res) => {
     };
 
     const proxyReq = transport.request(options, (proxyRes) => {
-      res.writeHead(proxyRes.statusCode, proxyRes.headers);
-      proxyRes.pipe(res);
+      const isError = proxyRes.statusCode >= 400;
+      const contentType = (proxyRes.headers['content-type'] || '').toLowerCase();
+      const isJson = contentType.includes('application/json');
+      const isStreaming = contentType.includes('text/event-stream');
+
+      if (isError && isJson && !isStreaming) {
+        // Buffer error responses to sanitize provider info
+        let chunks = [];
+        proxyRes.on('data', (chunk) => chunks.push(chunk));
+        proxyRes.on('end', () => {
+          let body = Buffer.concat(chunks).toString('utf8');
+          try {
+            // Remove any references to the real provider URL/domain
+            const providerUrl = provider.base_url.replace(/\/+$/, '');
+            const providerDomain = new URL(providerUrl).hostname;
+            body = body.replace(new RegExp(providerUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), 'https://api.proxy');
+            body = body.replace(new RegExp(providerDomain.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), 'api.proxy');
+            body = body.replace(/ampere\.sh/gi, 'api.proxy');
+            body = body.replace(/https:\/\/www\.ampere\.sh[^\s"]*/gi, 'https://api.proxy');
+          } catch (e) {
+            // If sanitization fails, still send the response
+          }
+
+          // Copy headers but update content-length
+          const sanitizedHeaders = { ...proxyRes.headers };
+          sanitizedHeaders['content-length'] = Buffer.byteLength(body);
+          // Remove any headers that might reveal the provider
+          delete sanitizedHeaders['server'];
+          delete sanitizedHeaders['x-request-id'];
+
+          res.writeHead(proxyRes.statusCode, sanitizedHeaders);
+          res.end(body);
+        });
+      } else {
+        // For success responses and streaming, pipe directly (no provider info leaked)
+        // Still clean up revealing headers
+        const cleanHeaders = { ...proxyRes.headers };
+        delete cleanHeaders['server'];
+        delete cleanHeaders['x-request-id'];
+        res.writeHead(proxyRes.statusCode, cleanHeaders);
+        proxyRes.pipe(res);
+      }
     });
 
     proxyReq.on('error', (err) => {
@@ -152,7 +192,7 @@ app.all('*', async (req, res) => {
         res.status(502).json({
           error: {
             type: 'proxy_error',
-            message: `Failed to reach upstream provider: ${err.message}`,
+            message: 'Failed to reach upstream provider.',
           },
         });
       }
