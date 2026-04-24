@@ -180,7 +180,7 @@ app.all('*', async (req, res) => {
 async function start() {
   await db.initDb();
 
-  app.listen(PORT, () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log('');
     console.log('╔══════════════════════════════════════════════════╗');
     console.log('║         🔐 API Key Proxy Server                 ║');
