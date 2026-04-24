@@ -1,0 +1,16 @@
+# Render Blueprint - deploy with render.com
+services:
+  - type: web
+    name: api-key-proxy
+    runtime: node
+    buildCommand: npm install
+    startCommand: node src/server.js
+    envVars:
+      - key: MASTER_PASSWORD
+        sync: false
+      - key: ADMIN_USER
+        value: admin
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: CORS_ORIGINS
+        value: "*"

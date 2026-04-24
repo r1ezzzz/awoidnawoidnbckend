@@ -1,0 +1,19 @@
+{
+  "name": "api-key-proxy",
+  "version": "1.0.0",
+  "description": "Encrypted API key proxy with time-based access control",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "keygen": "node src/cli.js generate",
+    "keys:list": "node src/cli.js list",
+    "keys:revoke": "node src/cli.js revoke",
+    "setup": "node src/setup.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "dotenv": "^16.3.1",
+    "sql.js": "^1.10.3"
+  }
+}
